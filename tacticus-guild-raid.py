@@ -26,6 +26,7 @@ TACTICUS_API_URL = "https://api.tacticusgame.com/api/v1/guildRaid/"
 
 REQUIRED_ENV_VARS = ("GUILD_RAID_SPREADSHEET_ID", "GOOGLE_API_CREDENTIALS", "TACTICUS_API_KEY")
 
+# Filter only Epic and Legendary tiers
 TIERS = (3, 4)
 SETS = {0: 4, 1: 4, 2: 4, 3: 5, 4: 5}
 TIERS_NAMES = ("Common", "Uncommon", "Rare", "Epic", "Legendary")
@@ -224,6 +225,12 @@ def populate_database(db: sqlite3.Connection, entries: list) -> None:
     cursor = db.cursor()
 
     for entry in entries:
+
+        # Get only wanted tiers
+        if entry["tier"] not in TIERS:
+            continue
+
+        # Ignore Bomb damage type
         if entry["damageType"] == "Bomb":
             continue
 
