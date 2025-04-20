@@ -204,8 +204,6 @@ def populate_database(db: sqlite3.Connection, entries: list) -> None:
         """
         cursor.execute(query)
 
-    cursor.execute("commit")
-
 
 def update_spreadsheet(
     db: sqlite3.Connection, service: Resource, spreadsheet_id: str, sheet_name: str, users: list[str]
@@ -309,6 +307,7 @@ def main() -> int:
     users = get_user_ids(service, spreadsheet_id)
 
     db = sqlite3.connect(":memory:")
+    db.autocommit = True
     init_db(db)
 
     season = args.season
