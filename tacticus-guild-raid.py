@@ -22,7 +22,7 @@ import requests
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import Resource, build
 
-TACTICUS_API_URL = "https://api.tacticusgame.com/api/v1/guildRaid/"
+TACTICUS_API_URL = "https://api.tacticusgame.com/api/v1/guildRaid"
 
 # Filter only Epic and Legendary tiers
 TIERS = (3, 4)
@@ -246,12 +246,19 @@ def update_spreadsheet(
             sheet_batch_update(service, spreadsheet_id, [boss_name_data, damage_data, battles_data])
 
 
-def get_season_data(api_key: str, season: str) -> dict:
+def get_season_data(api_key: str, season: str = "") -> dict:
     """Fetch raid season data on Tacticus API."""
 
-    print(f"Fetching season {season} raid data...")
+    if season:
+        url = f"{TACTICUS_API_URL}/{season}"
+        msg = f"season {season}"
+    else:
+        url = TACTICUS_API_URL
+        msg = "current season"
+
+    print(f"Fetching {msg} raid data...")
     headers = {"accept": "application/json", "X-API-KEY": api_key}
-    response = requests.get(TACTICUS_API_URL + season, headers=headers, timeout=10)
+    response = requests.get(url, headers=headers, timeout=10)
     response.raise_for_status()
 
     return response.json()
@@ -290,7 +297,7 @@ def main() -> int:
     """Run the main program."""
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("season", help="Season number to update")
+    parser.add_argument("season", nargs="?", default="", help="Season number to update")
 
     args = parser.parse_args()
 
@@ -310,8 +317,8 @@ def main() -> int:
     db.autocommit = True
     init_db(db)
 
-    season = args.season
-    raid_data = get_season_data(api_key, season)
+    raid_data = get_season_data(api_key, args.season)
+    season = raid_data["season"]
 
     populate_database(db, raid_data["entries"])
 

@@ -10,7 +10,7 @@ You need to set 3 environment variables for the script to run:
 * `TACTICUS_API_KEY`: the Tacticus API key with the `Guild Raid` scope
 
 ```
-usage: tacticus-guild-raid.py [-h] season
+usage: tacticus-guild-raid.py [-h] [season]
 
 positional arguments:
   season      Season number to update
