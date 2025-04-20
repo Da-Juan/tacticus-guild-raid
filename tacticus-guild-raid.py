@@ -11,6 +11,8 @@
 """Get raid season data from Tactius API and update Google sheet."""
 
 import argparse
+import contextlib
+import json
 import os
 import sqlite3
 import sys
@@ -21,8 +23,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import Resource, build
 
 TACTICUS_API_URL = "https://api.tacticusgame.com/api/v1/guildRaid/"
-
-REQUIRED_ENV_VARS = ("GUILD_RAID_SPREADSHEET_ID", "GOOGLE_API_CREDENTIALS", "TACTICUS_API_KEY")
 
 # Filter only Epic and Legendary tiers
 TIERS = (3, 4)
@@ -259,6 +259,35 @@ def get_season_data(api_key: str, season: str) -> dict:
     return response.json()
 
 
+def getenv_json(env: str, default: str = "") -> dict:
+    """Get json from environment variable."""
+
+    content = getenv(env, default)
+    return json.loads(content)
+
+
+def getenv(env: str, default: str = "") -> str:
+    """Get environment variables.
+
+    Lookup "env_FILE", "env", then raise an error.
+    """
+
+    ret = ""
+
+    env_file = f"{env}_FILE"
+    if env_file in os.environ:
+        with contextlib.suppress(OSError):
+            ret = Path(os.environ.get(env_file, default)).read_text()
+    elif env in os.environ:
+        ret = os.environ.get(env, default)
+
+    if not ret:
+        msg = f"Environment variable {env} is required"
+        raise ValueError(msg)
+
+    return ret
+
+
 def main() -> int:
     """Run the main program."""
 
@@ -267,19 +296,15 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    for variable in REQUIRED_ENV_VARS:
-        if variable not in os.environ:
-            print(f"ERROR: {variable} environment variable not found")
-            return 1
-
-    api_key = os.environ.get("TACTICUS_API_KEY", "")
-    spreadsheet_id = os.environ.get("GUILD_RAID_SPREADSHEET_ID", "")
-    google_api_secret = Path(os.environ.get("GOOGLE_API_CREDENTIALS", "")).expanduser()
-    if not google_api_secret.exists():
-        print(f"ERROR: '{google_api_secret}' is an invalid path")
+    try:
+        api_key = getenv("TACTICUS_API_KEY")
+        spreadsheet_id = getenv("GUILD_RAID_SPREADSHEET_ID")
+        google_api_secret = getenv_json("GOOGLE_API_CREDENTIALS")
+    except ValueError as exc:
+        print(exc)
         return 1
 
-    credentials = Credentials.from_service_account_file(google_api_secret, scopes=SCOPES)
+    credentials = Credentials.from_service_account_info(google_api_secret, scopes=SCOPES)
     service = build("sheets", "v4", credentials=credentials)
     users = get_user_ids(service, spreadsheet_id)
 
