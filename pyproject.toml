@@ -1,0 +1,38 @@
+[project]
+name = "tacticus-guild-raid"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "google-api-python-client>=2.167.0",
+    "google-auth-httplib2>=0.2.0",
+    "google-auth-oauthlib>=1.2.1",
+    "requests>=2.32.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.6",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+lint.select = ["ALL"]
+lint.ignore = [
+    "COM812",  # incompatible with ruff formatter
+    "D202",
+    "D203",  # incompatible with D211
+    "D213",  # incompatible with D212
+    "ISC001",  # incompatible with ruff formatter
+    "T201",  # let me use print!
+    "S608",  # I'm ok with SQL injection in this script
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
