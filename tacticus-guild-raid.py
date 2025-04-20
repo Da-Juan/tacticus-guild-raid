@@ -277,7 +277,7 @@ def getenv(env: str, default: str = "") -> str:
     env_file = f"{env}_FILE"
     if env_file in os.environ:
         with contextlib.suppress(OSError):
-            ret = Path(os.environ.get(env_file, default)).read_text()
+            ret = Path(os.environ.get(env_file, default)).read_text().strip()
     elif env in os.environ:
         ret = os.environ.get(env, default)
 
