@@ -17,9 +17,7 @@ import sys
 from pathlib import Path
 
 import requests
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import Resource, build
 
 TACTICUS_API_URL = "https://api.tacticusgame.com/api/v1/guildRaid/"
@@ -102,44 +100,6 @@ SHEET_RANGES = {
         "battles": "AS4:AS33",
     },
 }
-
-
-def xdg_cache_home() -> Path:
-    """Get xdg cache home."""
-
-    if (value := os.environ.get("XDG_CACHE_HOME")) and (path := Path(value)).is_absolute():
-        return path
-
-    return Path.home() / ".cache"
-
-
-def init_google_creds(credentials: Path) -> Credentials:
-    """Initialize Google credentials."""
-
-    creds = None
-    # The file token.json stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    cache_path = xdg_cache_home() / "tacticus-guild-raid"
-    cache_path.mkdir(exist_ok=True)
-
-    token = cache_path / "token.json"
-
-    if token.exists():
-        creds = Credentials.from_authorized_user_file(token, SCOPES)
-
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials, SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        # Save the credentials for the next run
-        token.write_text(creds.to_json())
-
-    return creds
 
 
 def get_user_ids(service: Resource, spreadsheet_id: str) -> list[str]:
@@ -225,7 +185,6 @@ def populate_database(db: sqlite3.Connection, entries: list) -> None:
     cursor = db.cursor()
 
     for entry in entries:
-
         # Get only wanted tiers
         if entry["tier"] not in TIERS:
             continue
@@ -315,12 +274,13 @@ def main() -> int:
 
     api_key = os.environ.get("TACTICUS_API_KEY", "")
     spreadsheet_id = os.environ.get("GUILD_RAID_SPREADSHEET_ID", "")
-    google_api_credentials = Path(os.environ.get("GOOGLE_API_CREDENTIALS", "")).expanduser()
-    if not google_api_credentials.exists():
-        print(f"ERROR: '{google_api_credentials}' is an invalid path")
+    google_api_secret = Path(os.environ.get("GOOGLE_API_CREDENTIALS", "")).expanduser()
+    if not google_api_secret.exists():
+        print(f"ERROR: '{google_api_secret}' is an invalid path")
         return 1
 
-    service = build("sheets", "v4", credentials=init_google_creds(google_api_credentials))
+    credentials = Credentials.from_service_account_file(google_api_secret, scopes=SCOPES)
+    service = build("sheets", "v4", credentials=credentials)
     users = get_user_ids(service, spreadsheet_id)
 
     db = sqlite3.connect(":memory:")
