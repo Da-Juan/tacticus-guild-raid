@@ -5,7 +5,9 @@
 #     "google-api-python-client>=2.167.0",
 #     "google-auth-httplib2>=0.2.0",
 #     "google-auth-oauthlib>=1.2.1",
+#     "pytz>=2025.2",
 #     "requests>=2.32.3",
+#     "schedule>=1.2.2",
 # ]
 # ///
 """Get raid season data from Tactius API and update Google sheet."""
@@ -15,16 +17,21 @@ import contextlib
 import json
 import logging
 import os
+import signal
 import sqlite3
 import sys
-from pathlib import Path
 import time
+from pathlib import Path
+from types import FrameType
 
 import requests
+import schedule
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import Resource, build
 
 TACTICUS_API_URL = "https://api.tacticusgame.com/api/v1/guildRaid"
+
+SCHEDULE_TIME = "08:55"
 
 # Filter only Epic and Legendary tiers
 TIERS = (3, 4)
@@ -110,6 +117,8 @@ formatter = logging.Formatter("%(asctime)s [%(levelname)s]: %(message)s", "%Y-%m
 formatter.converter = time.gmtime
 handler.setFormatter(formatter)
 logger.addHandler(handler)
+
+sentinel = True
 
 
 def get_user_ids(service: Resource, spreadsheet_id: str) -> list[str]:
@@ -308,6 +317,40 @@ def getenv(env: str, default: str = "") -> str:
     return ret
 
 
+def signal_handler(sig: int, _: FrameType | None) -> None:
+    """Handle signal for a clean exit."""
+    global sentinel  # noqa: PLW0603
+
+    logger.info("Recieved signal %s, exiting.", sig)
+    sentinel = False
+
+
+def update_raid_data(api_key: str, spreadsheet_id: str, google_api_secret: dict, season: str = "") -> None:
+    """Update the Google sheet with raid season data."""
+
+    credentials = Credentials.from_service_account_info(google_api_secret, scopes=SCOPES)
+    service = build("sheets", "v4", credentials=credentials)
+    users = get_user_ids(service, spreadsheet_id)
+
+    db = sqlite3.connect(":memory:")
+    db.autocommit = True
+    init_db(db)
+
+    raid_data = get_season_data(api_key, season)
+    season = raid_data["season"]
+
+    populate_database(db, raid_data["entries"])
+
+    msg = f"Raid data for season {season}..."
+    logger.info(msg)
+    sheet_name = f"Season {season}"
+    create_sheet_if_not_exist(service, spreadsheet_id, sheet_name)
+
+    update_spreadsheet(db, service, spreadsheet_id, sheet_name, users)
+
+    db.close()
+
+
 def main() -> int:
     """Run the main program."""
 
@@ -324,28 +367,21 @@ def main() -> int:
         logger.exception("Missing environment variable")
         return 1
 
-    credentials = Credentials.from_service_account_info(google_api_secret, scopes=SCOPES)
-    service = build("sheets", "v4", credentials=credentials)
-    users = get_user_ids(service, spreadsheet_id)
+    schedule.every().day.at(SCHEDULE_TIME, "UTC").do(
+        update_raid_data, api_key, spreadsheet_id, google_api_secret, args.season
+    )
 
-    db = sqlite3.connect(":memory:")
-    db.autocommit = True
-    init_db(db)
+    # if season is provided it's a one shot run
+    if args.season:
+        schedule.run_all()
+    else:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, signal_handler)
+        while sentinel:
+            schedule.run_pending()
+            time.sleep(1)
 
-    raid_data = get_season_data(api_key, args.season)
-    season = raid_data["season"]
-
-    populate_database(db, raid_data["entries"])
-
-    msg = f"Raid data for season {season}..."
-    logger.info(msg)
-    sheet_name = f"Season {season}"
-    create_sheet_if_not_exist(service, spreadsheet_id, sheet_name)
-
-    update_spreadsheet(db, service, spreadsheet_id, sheet_name, users)
-
-    db.close()
-
+    schedule.clear()
     return 0
 
 
