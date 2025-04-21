@@ -13,10 +13,12 @@
 import argparse
 import contextlib
 import json
+import logging
 import os
 import sqlite3
 import sys
 from pathlib import Path
+import time
 
 import requests
 from google.oauth2.service_account import Credentials
@@ -101,6 +103,14 @@ SHEET_RANGES = {
     },
 }
 
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+formatter = logging.Formatter("%(asctime)s [%(levelname)s]: %(message)s", "%Y-%m-%d %H:%M:%S")
+formatter.converter = time.gmtime
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
 
 def get_user_ids(service: Resource, spreadsheet_id: str) -> list[str]:
     """Get the list of user ids from the Google sheet."""
@@ -112,7 +122,7 @@ def get_user_ids(service: Resource, spreadsheet_id: str) -> list[str]:
     values = result.get("values", [])
 
     if not values:
-        print("No data found.")
+        logger.error("No data found")
         return []
 
     return [v[0] for v in values]
@@ -123,7 +133,8 @@ def sheet_batch_update(service: Resource, spreadsheet_id: str, data: list) -> No
 
     body = {"valueInputOption": "RAW", "data": data}
     result = service.spreadsheets().values().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
-    print(f"{(result.get('totalUpdatedCells'))} cells updated.")
+    msg = f"{(result.get('totalUpdatedCells'))} cells updated"
+    logger.info(msg)
 
 
 def get_sheet_index(title: str, sheets: list) -> tuple[int, int] | None:
@@ -146,7 +157,8 @@ def create_sheet_if_not_exist(service: Resource, spreadsheet_id: str, title: str
     sheets = result.get("sheets")
 
     if get_sheet_index(title, sheets) is None:
-        print(f"Creating sheet '{title}'")
+        msg = f"Creating sheet '{title}'"
+        logger.info(msg)
 
         template = get_sheet_index("Template", sheets)
         body = {
@@ -224,7 +236,8 @@ def update_spreadsheet(
                 "majorDimension": "ROWS",
                 "values": [[boss_name]],
             }
-            print(f"{TIERS_NAMES[tier]} {level + 1}: {boss_name}")
+            msg = f"{TIERS_NAMES[tier]} {level + 1}: {boss_name}"
+            logger.info(msg)
             query = f"""
                 select userid, sum(dmg), count(userid) from damages
                 where tier = {tier} and level = {level} group by userid
@@ -249,14 +262,16 @@ def update_spreadsheet(
 def get_season_data(api_key: str, season: str = "") -> dict:
     """Fetch raid season data on Tacticus API."""
 
+    msg = "Fetching "
     if season:
         url = f"{TACTICUS_API_URL}/{season}"
-        msg = f"season {season}"
+        msg += f"season {season}"
     else:
         url = TACTICUS_API_URL
-        msg = "current season"
+        msg += "current season"
+    msg += " raid data..."
 
-    print(f"Fetching {msg} raid data...")
+    logger.info(msg)
     headers = {"accept": "application/json", "X-API-KEY": api_key}
     response = requests.get(url, headers=headers, timeout=10)
     response.raise_for_status()
@@ -305,8 +320,8 @@ def main() -> int:
         api_key = getenv("TACTICUS_API_KEY")
         spreadsheet_id = getenv("GUILD_RAID_SPREADSHEET_ID")
         google_api_secret = getenv_json("GOOGLE_API_CREDENTIALS")
-    except ValueError as exc:
-        print(exc)
+    except ValueError:
+        logger.exception("Missing environment variable")
         return 1
 
     credentials = Credentials.from_service_account_info(google_api_secret, scopes=SCOPES)
@@ -322,7 +337,8 @@ def main() -> int:
 
     populate_database(db, raid_data["entries"])
 
-    print(f"Raid data for season {season}...")
+    msg = f"Raid data for season {season}..."
+    logger.info(msg)
     sheet_name = f"Season {season}"
     create_sheet_if_not_exist(service, spreadsheet_id, sheet_name)
 

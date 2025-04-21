@@ -30,7 +30,6 @@ lint.ignore = [
     "D203",  # incompatible with D211
     "D213",  # incompatible with D212
     "ISC001",  # incompatible with ruff formatter
-    "T201",  # let me use print!
     "S608",  # I'm ok with SQL injection in this script
 ]
 
