@@ -57,6 +57,8 @@ BOSSES = {
     "Belisarius": "Belisarius Cawl",
 }
 
+SHEET_NAME_PREFIX = "Season "
+
 SHEET_RANGES = {
     "30": {
         "boss_name": "Q2",
@@ -193,47 +195,143 @@ def init_db(db: sqlite3.Connection) -> None:
     cursor.executescript(
         """
         begin;
-        create table if not exists bosses(tier int, level int, name text, constraint uc_tier_level unique(tier, level));
-        create table if not exists damages(tier int, level int, dmg int, userid text);
+        PRAGMA foreign_keys = ON;
+        create table if not exists progress(season int primary key, tier int, level int);
+        create table if not exists bosses(
+            season int, tier int, level int, name text, constraint uc_stl unique(season, tier, level)
+        );
+        create table if not exists damages(
+            tier int,
+            level int,
+            dmg int,
+            userid text,
+            completedon int unique,
+            season int,
+            foreign key(season) references progress(season)
+        );
         commit;
         """
     )
 
 
-def populate_database(db: sqlite3.Connection, entries: list) -> None:
-    """Populate the database with entries from the Tacticus API."""
+def cleanup_db(db: sqlite3.Connection, season: str) -> None:
+    """Remove obsolete data from the database."""
 
     cursor = db.cursor()
 
+    cursor.executescript(
+        f"""
+        begin;
+        delete from damages where season < {season};
+        delete from bosses where season < {season};
+        delete from progress where season < {season};
+        commit;
+        """
+    )
+
+
+def populate_database(db: sqlite3.Connection, season: str, previous_update: tuple[int, int], entries: list) -> None:
+    """Populate the database with entries from the Tacticus API."""
+
+    cursor = db.cursor()
+    tier = level = 0
+    updated = False
+
+    # Make sure we have the season in progress table for the foreign key constraint
+    query = f"insert or ignore into progress (season, tier, level) values ({season}, {tier}, {level})"
+    cursor.execute(query)
+
+    last_tier, last_level = previous_update
+
     for entry in entries:
+        tier = entry["tier"]
+
         # Get only wanted tiers
-        if entry["tier"] not in TIERS:
+        if (tier not in TIERS) or (tier < last_tier):
+            continue
+
+        level = entry["set"]
+        # Get only wanted levels
+        if tier >= last_tier and level < last_level:
             continue
 
         # Ignore Bomb damage type
         if entry["damageType"] == "Bomb":
             continue
 
-        query = f"insert or ignore into bosses values({entry['tier']}, {entry['set']}, '{entry['type']}')"
+        query = f"""
+        insert or ignore into bosses (season, tier, level, name) values ({season}, {tier}, {level}, '{entry["type"]}')
+        """
         cursor.execute(query)
         query = f"""
-        insert into damages values(
-            {entry["tier"]},
-            {entry["set"]},
-            {int(entry["damageDealt"])}, '{entry["userId"]}'
+        insert or ignore into damages values(
+            {tier},
+            {level},
+            {entry["damageDealt"]},
+            '{entry["userId"]}',
+            {entry["completedOn"]},
+            {season}
         )
         """
         cursor.execute(query)
+        updated = True
+
+    if not updated:
+        return
+
+    query = f"insert or replace into progress values({season}, {tier}, {level})"
+    cursor.execute(query)
 
 
-def update_spreadsheet(
-    db: sqlite3.Connection, service: Resource, spreadsheet_id: str, sheet_name: str, users: list[str]
+def get_last_updated_boss(db: sqlite3.Connection, season: str) -> tuple[int, int]:
+    """Get the last updated boss from the database."""
+
+    cursor = db.cursor()
+
+    query = f"select tier, level from progress where season = {season}"
+    cursor.execute(query)
+    if (result := cursor.fetchone()) is None:
+        return (0, 0)
+
+    return result
+
+
+def get_last_updated_season(db: sqlite3.Connection) -> int:
+    """Get the last updated season from the database."""
+
+    result = 0
+
+    cursor = db.cursor()
+
+    query = "select season from progress order by season desc limit 1"
+    cursor.execute(query)
+    if (result := cursor.fetchone()) is None:
+        return 0
+
+    return result[0]
+
+
+def update_spreadsheet(  # noqa: PLR0913
+    db: sqlite3.Connection,
+    service: Resource,
+    spreadsheet_id: str,
+    season: str,
+    users: list[str],
+    previous_update: tuple[int, int],
 ) -> None:
     """Update the spreadsheet with data gathered from Tacticus API."""
 
     cursor = db.cursor()
-    for tier in TIERS:
+
+    last_tier, last_level = previous_update
+    sheet_name = f"{SHEET_NAME_PREFIX}{season}"
+
+    for tier in [t for t in TIERS if t >= last_tier]:
         for level in range(SETS[tier]):
+            # Get only wanted levels
+            if tier >= last_tier and level < last_level:
+                continue
+
             query = f"select name from bosses where tier = {tier} and level = {level}"
             cursor.execute(query)
             row = cursor.fetchone()
@@ -249,7 +347,7 @@ def update_spreadsheet(
             logger.info(msg)
             query = f"""
                 select userid, sum(dmg), count(userid) from damages
-                where tier = {tier} and level = {level} group by userid
+                where tier = {tier} and level = {level} and season = {season} group by userid
             """
             cursor.execute(query)
             damage_data = {
@@ -325,30 +423,32 @@ def signal_handler(sig: int, _: FrameType | None) -> None:
     sentinel = False
 
 
-def update_raid_data(api_key: str, spreadsheet_id: str, google_api_secret: dict, season: str = "") -> None:
+def update_raid_data(
+    db: sqlite3.Connection, api_key: str, spreadsheet_id: str, google_api_secret: dict, season: str = ""
+) -> None:
     """Update the Google sheet with raid season data."""
 
     credentials = Credentials.from_service_account_info(google_api_secret, scopes=SCOPES)
     service = build("sheets", "v4", credentials=credentials)
     users = get_user_ids(service, spreadsheet_id)
 
-    db = sqlite3.connect(":memory:")
-    db.autocommit = True
-    init_db(db)
-
     raid_data = get_season_data(api_key, season)
     season = raid_data["season"]
 
-    populate_database(db, raid_data["entries"])
+    previous_season = get_last_updated_season(db)
+    previous_update = get_last_updated_boss(db, season)
+
+    populate_database(db, season, previous_update, raid_data["entries"])
 
     msg = f"Raid data for season {season}..."
     logger.info(msg)
-    sheet_name = f"Season {season}"
-    create_sheet_if_not_exist(service, spreadsheet_id, sheet_name)
 
-    update_spreadsheet(db, service, spreadsheet_id, sheet_name, users)
+    create_sheet_if_not_exist(service, spreadsheet_id, f"{SHEET_NAME_PREFIX}{season}")
 
-    db.close()
+    update_spreadsheet(db, service, spreadsheet_id, season, users, previous_update)
+
+    if int(season) > previous_season:
+        cleanup_db(db, season)
 
 
 def main() -> int:
@@ -367,8 +467,12 @@ def main() -> int:
         logger.exception("Missing environment variable")
         return 1
 
+    db = sqlite3.connect(":memory:")
+    db.autocommit = True
+    init_db(db)
+
     schedule.every().day.at(SCHEDULE_TIME, "UTC").do(
-        update_raid_data, api_key, spreadsheet_id, google_api_secret, args.season
+        update_raid_data, db, api_key, spreadsheet_id, google_api_secret, args.season
     )
 
     # if season is provided it's a one shot run
@@ -382,6 +486,7 @@ def main() -> int:
             time.sleep(1)
 
     schedule.clear()
+    db.close()
     return 0
 
 
