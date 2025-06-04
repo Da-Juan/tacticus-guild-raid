@@ -332,7 +332,7 @@ def update_spreadsheet(  # noqa: PLR0913
             if tier >= last_tier and level < last_level:
                 continue
 
-            query = f"select name from bosses where tier = {tier} and level = {level}"
+            query = f"select name from bosses where tier = {tier} and level = {level} and season = {season}"
             cursor.execute(query)
             row = cursor.fetchone()
             if row is None:
