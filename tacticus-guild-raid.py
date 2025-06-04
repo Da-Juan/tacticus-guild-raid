@@ -429,7 +429,7 @@ def update_raid_data(
     """Update the Google sheet with raid season data."""
 
     credentials = Credentials.from_service_account_info(google_api_secret, scopes=SCOPES)
-    service = build("sheets", "v4", credentials=credentials)
+    service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
     users = get_user_ids(service, spreadsheet_id)
 
     raid_data = get_season_data(api_key, season)
