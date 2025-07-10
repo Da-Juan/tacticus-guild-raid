@@ -31,6 +31,8 @@ from googleapiclient.discovery import Resource, build
 
 TACTICUS_API_URL = "https://api.tacticusgame.com/api/v1/guildRaid"
 
+DB_FILE = Path("tacticus-guild-raid.db")
+
 SCHEDULE_TIME = "08:55"
 
 # Filter only Epic and Legendary tiers
@@ -187,14 +189,17 @@ def create_sheet_if_not_exist(service: Resource, spreadsheet_id: str, title: str
         service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
 
 
-def init_db(db: sqlite3.Connection) -> None:
+def init_db() -> None:
     """Initialize the database."""
 
+    db = sqlite3.connect(DB_FILE, autocommit=False)
     cursor = db.cursor()
+
+    if not db.in_transaction:
+        cursor.execute("begin")
 
     cursor.executescript(
         """
-        begin;
         PRAGMA foreign_keys = ON;
         create table if not exists progress(season int primary key, tier int, level int);
         create table if not exists bosses(
@@ -212,6 +217,7 @@ def init_db(db: sqlite3.Connection) -> None:
         commit;
         """
     )
+    db.close()
 
 
 def cleanup_db(db: sqlite3.Connection, season: str) -> None:
@@ -219,9 +225,11 @@ def cleanup_db(db: sqlite3.Connection, season: str) -> None:
 
     cursor = db.cursor()
 
+    if not db.in_transaction:
+        cursor.execute("begin")
+
     cursor.executescript(
         f"""
-        begin;
         delete from damages where season < {season};
         delete from bosses where season < {season};
         delete from progress where season < {season};
@@ -240,6 +248,7 @@ def populate_database(db: sqlite3.Connection, season: str, previous_update: tupl
     # Make sure we have the season in progress table for the foreign key constraint
     query = f"insert or ignore into progress (season, tier, level) values ({season}, {tier}, {level})"
     cursor.execute(query)
+    db.commit()
 
     last_tier, last_level = previous_update
 
@@ -259,6 +268,8 @@ def populate_database(db: sqlite3.Connection, season: str, previous_update: tupl
         if entry["damageType"] == "Bomb":
             continue
 
+        if not db.in_transaction:
+            cursor.execute("begin")
         query = f"""
         insert or ignore into bosses (season, tier, level, name) values ({season}, {tier}, {level}, '{entry["type"]}')
         """
@@ -274,6 +285,7 @@ def populate_database(db: sqlite3.Connection, season: str, previous_update: tupl
         )
         """
         cursor.execute(query)
+        db.commit()
         updated = True
 
     if not updated:
@@ -281,6 +293,7 @@ def populate_database(db: sqlite3.Connection, season: str, previous_update: tupl
 
     query = f"insert or replace into progress values({season}, {tier}, {level})"
     cursor.execute(query)
+    db.commit()
 
 
 def get_last_updated_boss(db: sqlite3.Connection, season: str) -> tuple[int, int]:
@@ -424,9 +437,7 @@ def signal_handler(sig: int, _: FrameType | None) -> None:
     sentinel = False
 
 
-def update_raid_data(
-    db: sqlite3.Connection, api_key: str, spreadsheet_id: str, google_api_secret: dict, season: str = ""
-) -> None:
+def update_raid_data(api_key: str, spreadsheet_id: str, google_api_secret: dict, season: str = "") -> None:
     """Update the Google sheet with raid season data."""
 
     credentials = Credentials.from_service_account_info(google_api_secret, scopes=SCOPES)
@@ -435,6 +446,8 @@ def update_raid_data(
 
     raid_data = get_season_data(api_key, season)
     season = raid_data["season"]
+
+    db = sqlite3.connect(DB_FILE, autocommit=False)
 
     previous_season = get_last_updated_season(db)
     previous_update = get_last_updated_boss(db, season)
@@ -450,6 +463,8 @@ def update_raid_data(
 
     if int(season) > previous_season:
         cleanup_db(db, season)
+
+    db.close()
 
 
 def main() -> int:
@@ -468,12 +483,10 @@ def main() -> int:
         logger.exception("Missing environment variable")
         return 1
 
-    db = sqlite3.connect(":memory:")
-    db.autocommit = True
-    init_db(db)
+    init_db()
 
     schedule.every().day.at(SCHEDULE_TIME, "UTC").do(
-        update_raid_data, db, api_key, spreadsheet_id, google_api_secret, args.season
+        update_raid_data, api_key, spreadsheet_id, google_api_secret, args.season
     )
 
     # if season is provided it's a one shot run
@@ -487,7 +500,6 @@ def main() -> int:
             time.sleep(1)
 
     schedule.clear()
-    db.close()
     return 0
 
 
