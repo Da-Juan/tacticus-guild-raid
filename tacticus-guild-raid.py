@@ -337,7 +337,8 @@ def update_spreadsheet(  # noqa: PLR0913
             row = cursor.fetchone()
             if row is None:
                 continue
-            boss_name = BOSSES[row[0]]
+            # Avoid errors when new boss are added
+            boss_name = BOSSES.get(row[0], row[0])
             boss_name_data = {
                 "range": sheet_name + "!" + SHEET_RANGES[f"{tier}{level}"]["boss_name"],
                 "majorDimension": "ROWS",
