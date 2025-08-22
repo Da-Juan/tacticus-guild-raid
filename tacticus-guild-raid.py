@@ -57,6 +57,7 @@ BOSSES = {
     "AvatarOfKhaine": "Avatar of Khaine",
     "Magnus": "Magnus",
     "Belisarius": "Belisarius Cawl",
+    "Riptide": "XV104 Riptide Battlesuit",
 }
 
 SHEET_NAME_PREFIX = "Season "
