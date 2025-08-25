@@ -37,8 +37,8 @@ SCHEDULE_TIME = "08:55"
 
 # Filter only Epic and Legendary tiers
 TIERS = (3, 4)
-SETS = {0: 4, 1: 4, 2: 4, 3: 5, 4: 5}
-TIERS_NAMES = ("Common", "Uncommon", "Rare", "Epic", "Legendary")
+SETS = {0: 4, 1: 4, 2: 4, 3: 5, 4: 5, 5: 1}
+TIERS_NAMES = ("Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -112,6 +112,11 @@ SHEET_RANGES = {
         "boss_name": "AR2",
         "dmg": "AR4:AR33",
         "battles": "AS4:AS33",
+    },
+    "50": {
+        "boss_name": "AU2",
+        "dmg": "AU4:AU33",
+        "battles": "AV4:AV33",
     },
 }
 
