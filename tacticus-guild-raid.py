@@ -35,8 +35,8 @@ DB_FILE = Path("tacticus-guild-raid.db")
 
 SCHEDULE_TIME = "08:55"
 
-# Filter only Epic and Legendary tiers
-TIERS = (3, 4)
+# Filter only Epic, Legendary and Mythic tiers
+TIERS = (3, 4, 5)
 SETS = {0: 4, 1: 4, 2: 4, 3: 5, 4: 5, 5: 1}
 TIERS_NAMES = ("Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic")
 
