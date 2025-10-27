@@ -381,8 +381,14 @@ def update_spreadsheet(  # noqa: PLR0913
                 "values": [["" for _ in range(len(users))]],
             }
             for row in cursor.fetchall():
-                damage_data["values"][0][users.index(row[0])] = row[1]
-                battles_data["values"][0][users.index(row[0])] = row[2]
+                try:
+                    user = users.index(row[0])
+                except IndexError:
+                    logger.warning("Unkown user ID %s", row[0])
+                    continue
+                else:
+                    damage_data["values"][0][user] = row[1]
+                    battles_data["values"][0][user] = row[2]
             sheet_batch_update(service, spreadsheet_id, [boss_name_data, damage_data, battles_data])
 
 
