@@ -6,6 +6,7 @@
 #     "google-auth-httplib2>=0.2.0",
 #     "google-auth-oauthlib>=1.2.1",
 #     "pytz>=2025.2",
+#     "pyyaml>=6.0.3",
 #     "requests>=2.32.3",
 #     "schedule>=1.2.2",
 # ]
@@ -23,102 +24,29 @@ import sys
 import time
 from pathlib import Path
 from types import FrameType
+from typing import Any
 
 import requests
 import schedule
+import yaml
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import Resource, build
 
-TACTICUS_API_URL = "https://api.tacticusgame.com/api/v1/guildRaid"
+DEFAULT_CONFIG = {
+    "tacticus_api_url": "https://api.tacticusgame.com/api/v1/guildRaid",
+    "sheet": {"name_prefix": "Season "},
+}
+
 
 DB_FILE = Path("tacticus-guild-raid.db")
 
 SCHEDULE_TIME = "08:55"
 
-# Filter only Epic, Legendary and Mythic tiers
-TIERS = (3, 4, 5)
-SETS = {0: 4, 1: 4, 2: 4, 3: 5, 4: 5, 5: 1}
 TIERS_NAMES = ("Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-BOSSES = {
-    "HiveTyrantGorgon": "Hive Tyrant (Hive fleet Gorgon)",
-    "HiveTyrantKronos": "Hive Tyrant (Hive fleet Kronos)",
-    "HiveTyrantLeviathan": "Hive Tyrant (Hive fleet Leviathan)",
-    "TervigonGorgon": "Tervigon (Hive fleet Gorgon)",
-    "TervigonKronos": "Tervigon (Hive fleet Kronos)",
-    "TervigonLeviathan": "Tervigon (Hive fleet Leviathan)",
-    "SilentKing": "Szarekh",
-    "Ghazghkull": "Ghazghkull Mag Uruk Thraka",
-    "Mortarion": "Mortarion",
-    "ScreamerKiller": "Screamer-killer",
-    "RogalDorn": "Rogal Dorn battle tank",
-    "AvatarOfKhaine": "Avatar of Khaine",
-    "Magnus": "Magnus",
-    "Belisarius": "Belisarius Cawl",
-    "Riptide": "XV104 Riptide Battlesuit",
-}
-
 SHEET_NAME_PREFIX = "Season "
-
-SHEET_RANGES = {
-    "30": {
-        "boss_name": "Q2",
-        "dmg": "Q4:Q33",
-        "battles": "R4:R33",
-    },
-    "31": {
-        "boss_name": "T2",
-        "dmg": "T4:T33",
-        "battles": "U4:U33",
-    },
-    "32": {
-        "boss_name": "W2",
-        "dmg": "W4:W33",
-        "battles": "X4:X33",
-    },
-    "33": {
-        "boss_name": "Z2",
-        "dmg": "Z4:Z33",
-        "battles": "AA4:AA33",
-    },
-    "34": {
-        "boss_name": "AC2",
-        "dmg": "AC4:AC33",
-        "battles": "AD4:AD33",
-    },
-    "40": {
-        "boss_name": "AF2",
-        "dmg": "AF4:AF33",
-        "battles": "AG4:AG33",
-    },
-    "41": {
-        "boss_name": "AI2",
-        "dmg": "AI4:AI33",
-        "battles": "AJ4:AJ33",
-    },
-    "42": {
-        "boss_name": "AL2",
-        "dmg": "AL4:AL33",
-        "battles": "AM4:AM33",
-    },
-    "43": {
-        "boss_name": "AO2",
-        "dmg": "AO4:AO33",
-        "battles": "AP4:AP33",
-    },
-    "44": {
-        "boss_name": "AR2",
-        "dmg": "AR4:AR33",
-        "battles": "AS4:AS33",
-    },
-    "50": {
-        "boss_name": "AU2",
-        "dmg": "AU4:AU33",
-        "battles": "AV4:AV33",
-    },
-}
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -129,6 +57,19 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 sentinel = True
+
+
+def deep_merge(source: dict[Any, Any], destination: dict[Any, Any]) -> dict[Any, Any]:
+    """Deep merge dictionnaries."""
+    for key, value in source.items():
+        if isinstance(value, dict):
+            # get node or create one
+            node = destination.setdefault(key, {})
+            deep_merge(value, node)
+        else:
+            destination[key] = value
+
+    return destination
 
 
 def get_user_ids(service: Resource, spreadsheet_id: str) -> list[str]:
@@ -180,6 +121,10 @@ def create_sheet_if_not_exist(service: Resource, spreadsheet_id: str, title: str
         logger.info(msg)
 
         template = get_sheet_index("Template", sheets)
+        if template is None:
+            msg = "Unable to find template sheet"
+            raise ValueError(msg)
+
         body = {
             "includeSpreadsheetInResponse": False,
             "requests": [
@@ -244,7 +189,9 @@ def cleanup_db(db: sqlite3.Connection, season: str) -> None:
     )
 
 
-def populate_database(db: sqlite3.Connection, season: str, previous_update: tuple[int, int], entries: list) -> None:
+def populate_database(
+    db: sqlite3.Connection, config: dict[str, Any], season: str, previous_update: tuple[int, int], entries: list
+) -> None:
     """Populate the database with entries from the Tacticus API."""
 
     cursor = db.cursor()
@@ -262,7 +209,7 @@ def populate_database(db: sqlite3.Connection, season: str, previous_update: tupl
         tier = entry["tier"]
 
         # Get only wanted tiers
-        if (tier not in TIERS) or (tier < last_tier):
+        if (tier not in config["tiers"]) or (tier < last_tier):
             continue
 
         level = entry["set"]
@@ -332,6 +279,7 @@ def get_last_updated_season(db: sqlite3.Connection) -> int:
 
 def update_spreadsheet(  # noqa: PLR0913
     db: sqlite3.Connection,
+    config: dict[str, Any],
     service: Resource,
     spreadsheet_id: str,
     season: str,
@@ -343,10 +291,10 @@ def update_spreadsheet(  # noqa: PLR0913
     cursor = db.cursor()
 
     last_tier, last_level = previous_update
-    sheet_name = f"{SHEET_NAME_PREFIX}{season}"
+    sheet_name = f"{config['sheet']['name_prefix']}{season}"
 
-    for tier in [t for t in TIERS if t >= last_tier]:
-        for level in range(SETS[tier]):
+    for tier in [t for t in config["tiers"] if t >= last_tier]:
+        for level in range(config["sets"][tier]):
             # Get only wanted levels
             if tier >= last_tier and level < last_level:
                 continue
@@ -356,10 +304,13 @@ def update_spreadsheet(  # noqa: PLR0913
             row = cursor.fetchone()
             if row is None:
                 continue
+
+            sheet_range = config["sheet"]["ranges"][f"{tier}{level}"]
+
             # Avoid errors when new boss are added
-            boss_name = BOSSES.get(row[0], row[0])
+            boss_name = config["bosses"].get(row[0], row[0])
             boss_name_data = {
-                "range": sheet_name + "!" + SHEET_RANGES[f"{tier}{level}"]["boss_name"],
+                "range": sheet_name + "!" + sheet_range["boss_name"],
                 "majorDimension": "ROWS",
                 "values": [[boss_name]],
             }
@@ -371,12 +322,12 @@ def update_spreadsheet(  # noqa: PLR0913
             """
             cursor.execute(query)
             damage_data = {
-                "range": sheet_name + "!" + SHEET_RANGES[f"{tier}{level}"]["dmg"],
+                "range": sheet_name + "!" + sheet_range["dmg"],
                 "majorDimension": "COLUMNS",
                 "values": [["" for _ in range(len(users))]],
             }
             battles_data = {
-                "range": sheet_name + "!" + SHEET_RANGES[f"{tier}{level}"]["battles"],
+                "range": sheet_name + "!" + sheet_range["battles"],
                 "majorDimension": "COLUMNS",
                 "values": [["" for _ in range(len(users))]],
             }
@@ -392,15 +343,15 @@ def update_spreadsheet(  # noqa: PLR0913
             sheet_batch_update(service, spreadsheet_id, [boss_name_data, damage_data, battles_data])
 
 
-def get_season_data(api_key: str, season: str = "") -> dict:
+def get_season_data(api_key: str, config: dict[str, Any], season: str = "") -> dict:
     """Fetch raid season data on Tacticus API."""
 
     msg = "Fetching "
     if season:
-        url = f"{TACTICUS_API_URL}/{season}"
+        url = f"{config['tacticus_api_url']}/{season}"
         msg += f"season {season}"
     else:
-        url = TACTICUS_API_URL
+        url = config["tacticus_api_url"]
         msg += "current season"
     msg += " raid data..."
 
@@ -449,14 +400,16 @@ def signal_handler(sig: int, _: FrameType | None) -> None:
     sentinel = False
 
 
-def update_raid_data(api_key: str, spreadsheet_id: str, google_api_secret: dict, season: str = "") -> None:
+def update_raid_data(
+    api_key: str, spreadsheet_id: str, google_api_secret: dict, config: dict[str, Any], season: str = ""
+) -> None:
     """Update the Google sheet with raid season data."""
 
     credentials = Credentials.from_service_account_info(google_api_secret, scopes=SCOPES)
     service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
     users = get_user_ids(service, spreadsheet_id)
 
-    raid_data = get_season_data(api_key, season)
+    raid_data = get_season_data(api_key, config, season)
     season = raid_data["season"]
 
     db = sqlite3.connect(DB_FILE, autocommit=False)
@@ -464,14 +417,14 @@ def update_raid_data(api_key: str, spreadsheet_id: str, google_api_secret: dict,
     previous_season = get_last_updated_season(db)
     previous_update = get_last_updated_boss(db, season)
 
-    populate_database(db, season, previous_update, raid_data["entries"])
+    populate_database(db, config, season, previous_update, raid_data["entries"])
 
     msg = f"Raid data for season {season}..."
     logger.info(msg)
 
-    create_sheet_if_not_exist(service, spreadsheet_id, f"{SHEET_NAME_PREFIX}{season}")
+    create_sheet_if_not_exist(service, spreadsheet_id, f"{config['sheet']['name_prefix']}{season}")
 
-    update_spreadsheet(db, service, spreadsheet_id, season, users, previous_update)
+    update_spreadsheet(db, config, service, spreadsheet_id, season, users, previous_update)
 
     if int(season) > previous_season:
         cleanup_db(db, season)
@@ -479,13 +432,56 @@ def update_raid_data(api_key: str, spreadsheet_id: str, google_api_secret: dict,
     db.close()
 
 
+def load_config(cfg: str) -> dict[str, Any]:
+    """Load configuration file."""
+    loaded_config: dict[str, Any] = {}
+    with Path(cfg).open("r") as f:
+        loaded_config = yaml.safe_load(f)
+
+    if not loaded_config:
+        msg = "Empty configuration file"
+        raise ValueError(msg)
+
+    config = deep_merge(loaded_config, DEFAULT_CONFIG)
+
+    if "sets" not in config:
+        msg = "Missing sets dictionnary in configuration file"
+        raise ValueError(msg)
+
+    if "tiers" not in config:
+        msg = "Missing tiers list in configuration file"
+        raise ValueError(msg)
+
+    if "ranges" not in config["sheet"]:
+        msg = "Missing sheet ranges configuration in configuration file"
+        raise ValueError(msg)
+
+    for tier in config["tiers"]:
+        for s in range(config["sets"][tier]):
+            if f"{tier}{s}" not in config["sheet"]["ranges"]:
+                msg = f"Missing sheet range configuration for tier {tier}{s}"
+                raise ValueError(msg)
+
+    return config
+
+
 def main() -> int:
     """Run the main program."""
 
     parser = argparse.ArgumentParser()
     parser.add_argument("season", nargs="?", default="", help="Season number to update")
+    parser.add_argument("-c", "--config", default="./config.yaml", help="Path to the configuration file")
 
     args = parser.parse_args()
+
+    try:
+        config = load_config(args.config)
+    except OSError:
+        logger.exception("Unable to load configuration file")
+        return 1
+    except ValueError:
+        logger.exception("Invalid configuration file")
+        return 1
 
     try:
         api_key = getenv("TACTICUS_API_KEY")
@@ -498,7 +494,12 @@ def main() -> int:
     init_db()
 
     schedule.every().day.at(SCHEDULE_TIME, "UTC").do(
-        update_raid_data, api_key, spreadsheet_id, google_api_secret, args.season
+        update_raid_data,
+        api_key,
+        spreadsheet_id,
+        google_api_secret,
+        config,
+        args.season,
     )
 
     # if season is provided it's a one shot run

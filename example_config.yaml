@@ -1,0 +1,87 @@
+---
+tacticus_api_url: https://api.tacticusgame.com/api/v1/guildRaid
+
+# Which tiers do we want to save
+tiers:
+  - 3
+  - 4
+  - 5
+
+# How many bosses per tier
+sets:
+  0: 4 # Common
+  1: 4 # Uncommon
+  2: 4 # Rare
+  3: 5 # Epic
+  4: 5 # Legendary
+  5: 2 # Mythic
+
+# Bosses names
+bosses:
+  HiveTyrantGorgon: "Hive Tyrant (Hive fleet Gorgon)"
+  HiveTyrantKronos: "Hive Tyrant (Hive fleet Kronos)"
+  HiveTyrantLeviathan: "Hive Tyrant (Hive fleet Leviathan)"
+  TervigonGorgon: "Tervigon (Hive fleet Gorgon)"
+  TervigonKronos: "Tervigon (Hive fleet Kronos)"
+  TervigonLeviathan: "Tervigon (Hive fleet Leviathan)"
+  SilentKing: "Szarekh"
+  Ghazghkull: "Ghazghkull Mag Uruk Thraka"
+  Mortarion: "Mortarion"
+  ScreamerKiller: "Screamer-killer"
+  RogalDorn: "Rogal Dorn battle tank"
+  AvatarOfKhaine: "Avatar of Khaine"
+  Magnus: "Magnus"
+  BelisariusRW: "Belisarius Cawl"
+  Riptide: "XV104 Riptide Battlesuit"
+
+sheet:
+  name_prefix: "Season "
+  ranges:
+    "30":
+      boss_name: Q2
+      dmg: "Q4:Q33"
+      battles: "R4:R33"
+    "31":
+      boss_name: T2
+      dmg: "T4:T33"
+      battles: "U4:U33"
+    "32":
+      boss_name: W2
+      dmg: "W4:W33"
+      battles: "X4:X33"
+    "33":
+      boss_name: Z2
+      dmg: "Z4:Z33"
+      battles: "AA4:AA33"
+    "34":
+      boss_name: AC2
+      dmg: "AC4:AC33"
+      battles: "AD4:AD33"
+    "40":
+      boss_name: AF2
+      dmg: "AF4:AF33"
+      battles: "AG4:AG33"
+    "41":
+      boss_name: AI2
+      dmg: "AI4:AI33"
+      battles: "AJ4:AJ33"
+    "42":
+      boss_name: AL2
+      dmg: "AL4:AL33"
+      battles: "AM4:AM33"
+    "43":
+      boss_name: AO2
+      dmg: "AO4:AO33"
+      battles: "AP4:AP33"
+    "44":
+      boss_name: AR2
+      dmg: "AR4:AR33"
+      battles: "AS4:AS33"
+    "50":
+      boss_name: AU2
+      dmg: "AU4:AU33"
+      battles: "AV4:AV33"
+    "51":
+      boss_name: AX2
+      dmg: "AX4:AX33"
+      battles: "AY4:AY33"
