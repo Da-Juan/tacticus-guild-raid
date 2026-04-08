@@ -171,7 +171,7 @@ def init_db() -> None:
     db.close()
 
 
-def cleanup_db(db: sqlite3.Connection, season: str) -> None:
+def cleanup_db(db: sqlite3.Connection, season: int) -> None:
     """Remove obsolete data from the database."""
 
     cursor = db.cursor()
@@ -190,7 +190,7 @@ def cleanup_db(db: sqlite3.Connection, season: str) -> None:
 
 
 def populate_database(
-    db: sqlite3.Connection, config: dict[str, Any], season: str, previous_update: tuple[int, int], entries: list
+    db: sqlite3.Connection, config: dict[str, Any], season: int, previous_update: tuple[int, int], entries: list
 ) -> None:
     """Populate the database with entries from the Tacticus API."""
 
@@ -249,7 +249,7 @@ def populate_database(
     db.commit()
 
 
-def get_last_updated_boss(db: sqlite3.Connection, season: str) -> tuple[int, int]:
+def get_last_updated_boss(db: sqlite3.Connection, season: int) -> tuple[int, int]:
     """Get the last updated boss from the database."""
 
     cursor = db.cursor()
@@ -262,19 +262,21 @@ def get_last_updated_boss(db: sqlite3.Connection, season: str) -> tuple[int, int
     return result
 
 
-def get_last_updated_season(db: sqlite3.Connection) -> int:
+def get_last_updated_season() -> int:
     """Get the last updated season from the database."""
 
-    result = 0
+    season = 0
 
+    db = sqlite3.connect(DB_FILE, autocommit=False)
     cursor = db.cursor()
 
     query = "select season from progress order by season desc limit 1"
     cursor.execute(query)
-    if (result := cursor.fetchone()) is None:
-        return 0
+    if (result := cursor.fetchone()) is not None:
+        season = result[0]
 
-    return result[0]
+    db.close()
+    return season
 
 
 def update_spreadsheet(  # noqa: PLR0913
@@ -282,7 +284,7 @@ def update_spreadsheet(  # noqa: PLR0913
     config: dict[str, Any],
     service: Resource,
     spreadsheet_id: str,
-    season: str,
+    season: int,
     users: list[str],
     previous_update: tuple[int, int],
 ) -> None:
@@ -343,11 +345,11 @@ def update_spreadsheet(  # noqa: PLR0913
             sheet_batch_update(service, spreadsheet_id, [boss_name_data, damage_data, battles_data])
 
 
-def get_season_data(api_key: str, config: dict[str, Any], season: str = "") -> dict:
+def get_season_data(api_key: str, config: dict[str, Any], season: int = 0) -> dict:
     """Fetch raid season data on Tacticus API."""
 
     msg = "Fetching "
-    if season:
+    if season != 0:
         url = f"{config['tacticus_api_url']}/{season}"
         msg += f"season {season}"
     else:
@@ -401,7 +403,7 @@ def signal_handler(sig: int, _: FrameType | None) -> None:
 
 
 def update_raid_data(
-    api_key: str, spreadsheet_id: str, google_api_secret: dict, config: dict[str, Any], season: str = ""
+    api_key: str, spreadsheet_id: str, google_api_secret: dict, config: dict[str, Any], season: int = 0
 ) -> None:
     """Update the Google sheet with raid season data."""
 
@@ -412,9 +414,13 @@ def update_raid_data(
     raid_data = get_season_data(api_key, config, season)
     season = raid_data["season"]
 
-    db = sqlite3.connect(DB_FILE, autocommit=False)
+    previous_season = get_last_updated_season()
 
-    previous_season = get_last_updated_season(db)
+    if previous_season != 0 and season > previous_season:
+        logger.info("Season change detected, updating previous season one last time...")
+        update_raid_data(api_key, spreadsheet_id, google_api_secret, config, season=previous_season)
+
+    db = sqlite3.connect(DB_FILE, autocommit=False)
     previous_update = get_last_updated_boss(db, season)
 
     populate_database(db, config, season, previous_update, raid_data["entries"])
@@ -426,7 +432,8 @@ def update_raid_data(
 
     update_spreadsheet(db, config, service, spreadsheet_id, season, users, previous_update)
 
-    if int(season) > previous_season:
+    if previous_season != 0 and season > previous_season:
+        logger.info("Cleaning up old season data...")
         cleanup_db(db, season)
 
     db.close()
@@ -469,7 +476,7 @@ def main() -> int:
     """Run the main program."""
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("season", nargs="?", default="", help="Season number to update")
+    parser.add_argument("season", nargs="?", type=int, default=0, help="Season number to update")
     parser.add_argument("-c", "--config", default="./config.yaml", help="Path to the configuration file")
 
     args = parser.parse_args()
@@ -503,7 +510,7 @@ def main() -> int:
     )
 
     # if season is provided it's a one shot run
-    if args.season:
+    if args.season != 0:
         schedule.run_all()
     else:
         for sig in (signal.SIGINT, signal.SIGTERM):
